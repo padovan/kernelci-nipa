@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import argparse
+import json
+import errno
+import os
+import sys
+import requests
+import gzip
+import shutil
+
+from datetime import datetime
+
+DEFAULT_OUTPUT_DIR = "output"
+RESULTS_SERVER = "https://nipa-results.collabora.dev"
+JSONS_FOLDER = "jsons"
+RESULTS_FOLDER = "results"
+RESULTS_MANIFEST = "results.json"
+KERNELCI_EXECUTOR = "kernelci-lava-collabora"
+
+MAESTRO_PROD_API = "https://kernelci-api.westus3.cloudapp.azure.com/"
+MAESTRO_STAGING_API = "https://staging.kernelci.org:9000/"
+
+def load_json(file_path):
+    """Load JSON data from a file, returning an empty list if the file doesn't exist or is invalid."""
+    if not os.path.exists(file_path):
+        return []
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return []
+
+
+def save_json(file_path, data):
+    """Save JSON data to a file."""
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+def maestro_fetch_node(url, nodeid):
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    url = url + "latest/node/" + nodeid
+    response = requests.get(url, headers=headers)
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as ex:
+        print(ex.response.json().get("detail"), file=sys.stderr)
+        sys.exit(errno.ENOENT)
+    except Exception as ex:
+        print(ex, file=sys.stderr)
+        sys.exit(errno.ENOENT)
+
+    return response.json()
+
+
+def convert_to_nipa_timestamp(timestamp):
+    """Convert ISO 8601 timestamp to the required format with timezone."""
+    dt = datetime.fromisoformat(timestamp)
+    return dt.strftime("%Y-%m-%d %H:%M:%S.%f+00:00")
+
+
+def download_and_extract_log(folder, url):
+    """Download a log file, check if it's gzip-compressed, and extract it."""
+    response = requests.get(url, stream=True)
+    response.raise_for_status()  # Raise error if request fails
+
+    temp_gz_file = "node.gz"
+    log_file = os.path.join(folder, "full_log")
+
+    with open(temp_gz_file, "wb") as f:
+        f.write(response.content)
+
+    with open(temp_gz_file, "rb") as f:
+        if f.read(2) == b"\x1f\x8b":  # Gzip magic number
+            with gzip.open(temp_gz_file, "rb") as gz_file, open(log_file, "wb") as log_file:
+                shutil.copyfileobj(gz_file, log_file)
+            print(f"Extracted log saved to {log_file.name}")
+        else:
+            print("Downloaded file is not a valid gzip archive.")
+
+    os.remove(temp_gz_file)
+
+
+def add_to_manifest(jsons_folder, results, branch):
+    file_path = os.path.join(jsons_folder, RESULTS_MANIFEST)
+
+    manifest = load_json(file_path)
+
+    # NOTE: According to the NIPA docs:
+    # https://github.com/linux-netdev/nipa/wiki/Netdev-CI-system
+    #
+    # We shouldn't fill in url until all the results are done.
+    # For now we are filling it right away, but we will have
+    # to revisit it sometime soon.
+    url = f"{RESULTS_SERVER}/{JSONS_FOLDER}/{results}"
+
+    new_entry = {
+        "url": url,
+        "branch": branch,
+        "executor": KERNELCI_EXECUTOR
+    }
+    manifest.append(new_entry)
+
+    save_json(file_path, manifest)
+    print(f"Entry added to {file_path}")
+
+
+def create_results(output, branch, start, end, results_id):
+    os.makedirs(output, exist_ok=True)
+
+    file_path = os.path.join(output, f"results-{results_id}.json")
+
+    results_data = {
+        "executor": KERNELCI_EXECUTOR,
+        "branch": branch,
+        "start": start,
+        "end": end,
+        "results": [],
+        "link": f"{RESULTS_SERVER}/{RESULTS_FOLDER}/{results_id}/"
+    }
+
+    save_json(file_path, results_data)
+    print(f"Results file created: {file_path}")
+    return file_path
+
+
+def add_result(output, results_id, group, test, result):
+    """Appends a test result to the specified results JSON file."""
+    file_path = os.path.join(output, f"results-{results_id}.json")
+
+    if not os.path.exists(file_path):
+        print(f"Error: Results file '{file_path}' does not exist.", file=sys.stderr)
+        sys.exit(1)
+
+    data = load_json(file_path)
+
+    new_result = {
+        "test": test,
+        "group": group,
+        "result": result,
+        "link": f"{RESULTS_SERVER}/{RESULTS_FOLDER}/{results_id}/{group}-{test.replace('/', '-')}"
+    }
+
+    data["results"].append(new_result)
+
+    save_json(file_path, data)
+    print(f"Added test result to {file_path}")
+
+
+def add_from_kernelci_node(id, jsons_folder, results_folder):
+    node = maestro_fetch_node(MAESTRO_PROD_API, id)
+
+    if node["kind"] != "job":
+        print(f"Error: Node {id} not a 'job' kind.", file=sys.stderr)
+        sys.exit(errno.ENOENT)
+
+    if node["state"] != "done":
+        print(f"Error: Job {id} didn't finish yet.", file=sys.stderr)
+        sys.exit(errno.ENOENT)
+
+    branch = node["data"]["kernel_revision"]["branch"]
+
+    # NOTE: should start be from the parent checkout?
+    start =  convert_to_nipa_timestamp(node["created"])
+    end =  convert_to_nipa_timestamp(node["updated"])
+    results_json = create_results(jsons_folder, branch, start, end, id)
+
+    result = node["result"] if node["result"] == "pass" else "fail"
+    group = "blktests"
+    test = "nvme/056"
+    add_result(jsons_folder, id, group, test, result)
+    add_to_manifest(jsons_folder, results_json, branch)
+
+    folder = os.path.join(results_folder, id)
+    os.makedirs(folder, exist_ok=True)
+    log = node["artifacts"]["lava_log"]
+    download_and_extract_log(folder, log)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="NIPA Results Management")
+    parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR,
+                                 help="Output directory (default: output)")
+    subparsers = parser.add_subparsers(dest="command", required=True, help="Available subcommands")
+
+    results_parser = subparsers.add_parser("bootstrap", help="Generate results JSON file")
+    results_parser.add_argument("--branch", required=True, help="Branch name")
+    results_parser.add_argument("--start", required=True, help="Start time (ISO format: YYYY-MM-DD HH:MM:SS)")
+    results_parser.add_argument("--end", required=True, help="End time (ISO format: YYYY-MM-DD HH:MM:SS)")
+    results_parser.add_argument("--id", required=True, help="Results ID (used to build the link)")
+
+    add_result_parser = subparsers.add_parser("add-result", help="Append a test result to a results file")
+    add_result_parser.add_argument("--id", required=True, help="Results ID (used to find the results file)")
+    add_result_parser.add_argument("--group", required=True, help="Test group name")
+    add_result_parser.add_argument("--test", required=True, help="Test name")
+    add_result_parser.add_argument("--result", required=True, choices=["pass", "fail", "skip"], help="Test result status")
+
+    add_result_parser = subparsers.add_parser("kci-node", help="Add results from a Maestro node")
+    add_result_parser.add_argument("--id", type=str, help="KernelCI's Maestro node id of the result")
+
+    args = parser.parse_args()
+
+    os.makedirs(args.output, exist_ok=True)
+    jsons_folder = os.path.join(args.output, JSONS_FOLDER)
+    os.makedirs(jsons_folder, exist_ok=True)
+    results_folder = os.path.join(args.output, RESULTS_FOLDER)
+    os.makedirs(results_folder, exist_ok=True)
+
+    if args.command == "bootstrap":
+        file_name = create_results(jsons_folder, args.branch, args.start, args.end, args.id)
+        add_to_manifest(jsons_folder, file_name, args.branch)
+    elif args.command == "add-result":
+        add_result(jsons_folder, args.id, args.group, args.test, args.result)
+    elif args.command == "kci-node":
+        add_from_kernelci_node(args.id, jsons_folder, results_folder)
+
+if __name__ == "__main__":
+    main()
