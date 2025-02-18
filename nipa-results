@@ -248,8 +248,8 @@ def add_from_kernelci_node(id, jsons_folder, results_folder):
 def main():
     parser = argparse.ArgumentParser(description="NIPA Results Management")
     parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR,
-                                 help="Output directory (default: netdev-results)")
-    parser.add_argument("--id", type=str, help="KernelCI's Maestro node id of the result")
+                        help="Output directory (default: netdev-results)")
+    parser.add_argument("--id", type=str, help="KernelCI's Maestro node id of the result", required=True)
 
     args = parser.parse_args()
 
