@@ -200,7 +200,7 @@ def main():
     add_result_parser.add_argument("--result", required=True, choices=["pass", "fail", "skip"], help="Test result status")
 
     add_result_parser = subparsers.add_parser("kci-node", help="Add results from a Maestro node")
-    add_result_parser.add_argument("--id", type=str, help="KernelCI's Maestro node id of the result")
+    add_result_parser.add_argument("--id", type=str, help="KernelCI's Maestro node id of the result", required=True)
 
     args = parser.parse_args()
 
