@@ -63,6 +63,18 @@ def convert_to_nipa_timestamp(timestamp):
     return dt.strftime("%Y-%m-%d %H:%M:%S.%f+00:00")
 
 
+def retrieve_lavalog_url(node):
+    """Retrieve lava log url from the node."""
+    # if this job dont have artifacts/lava_log
+    # we keep walking up the tree until we find one
+    while "lava_log" not in node["artifacts"]:
+        node = maestro_fetch_node(MAESTRO_PROD_API, node["parent"])
+        if node["kind"] != "job":
+            print(f"Error: Node {node['id']} is not a job.", file=sys.stderr)
+            sys.exit(errno.ENOENT)
+    return node["artifacts"]["lava_log"]
+
+
 def download_and_extract_log(folder, url):
     """Download a log file, check if it's gzip-compressed, and extract it."""
     response = requests.get(url, stream=True)
@@ -172,13 +184,13 @@ def add_from_kernelci_node(id, jsons_folder, results_folder):
     result = node["result"] if node["result"] == "pass" else "fail"
     group = "blktests"
     test = "nvme/056"
+    log_url = retrieve_lavalog_url(node)
     add_result(jsons_folder, id, group, test, result)
     add_to_manifest(jsons_folder, results_json, branch)
 
     folder = os.path.join(results_folder, id)
     os.makedirs(folder, exist_ok=True)
-    log = node["artifacts"]["lava_log"]
-    download_and_extract_log(folder, log)
+    download_and_extract_log(folder, log_url)
 
 
 def main():
