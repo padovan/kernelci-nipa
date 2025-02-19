@@ -13,7 +13,7 @@ import shutil
 from datetime import datetime
 
 DEFAULT_OUTPUT_DIR = "netdev-results"
-RESULTS_SERVER = "https://nipa-results.collabora.dev"
+RESULTS_SERVER = "https://storage.kernelci.org/netdev-results"
 JSONS_FOLDER = "jsons"
 RESULTS_FOLDER = "results"
 RESULTS_MANIFEST = "results.json"
