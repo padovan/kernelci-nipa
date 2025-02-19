@@ -140,7 +140,7 @@ def create_results(output, branch, start, end, results_id):
     return file_path
 
 
-def add_result(output, results_id, group, test, result):
+def add_result(output, results_id, group, test, result, folder_name):
     """Appends a test result to the specified results JSON file."""
     file_path = os.path.join(output, f"results-{results_id}.json")
 
@@ -154,7 +154,7 @@ def add_result(output, results_id, group, test, result):
         "test": test,
         "group": group,
         "result": result,
-        "link": f"{RESULTS_SERVER}/{RESULTS_FOLDER}/{results_id}/{group}-{test.replace('/', '-')}"
+        "link": f"{RESULTS_SERVER}/{RESULTS_FOLDER}/{results_id}/{folder_name}"
     }
 
     data["results"].append(new_result)
@@ -189,12 +189,14 @@ def add_from_kernelci_node(id, jsons_folder, results_folder):
     group = parent["name"]
     test = node["name"]
     log_url = retrieve_lavalog_url(parent)
-    add_result(jsons_folder, parent["id"], group, test, result)
-    add_to_manifest(jsons_folder, results_json, branch)
+    folder_name = f"{group}-{test.replace('/', '-')}"
+    add_result(jsons_folder, parent["id"], group, test, result, folder_name)
 
-    folder = os.path.join(results_folder, parent["id"])
+    folder = os.path.join(results_folder, parent["id"], folder_name)
     os.makedirs(folder, exist_ok=True)
     download_and_extract_log(folder, log_url)
+
+    add_to_manifest(jsons_folder, results_json, branch)
 
 
 def main():
