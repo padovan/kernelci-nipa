@@ -119,6 +119,10 @@ def add_to_manifest(jsons_folder, results, branch):
         "branch": branch,
         "executor": KERNELCI_EXECUTOR
     }
+    # avoid duplicates (they might contain multiple tests)
+    for entry in manifest:
+        if entry["url"] == url and entry["branch"] == branch:
+            return
     manifest.append(new_entry)
 
     save_json(file_path, manifest)
@@ -160,6 +164,11 @@ def add_result_json(output, results_id, group, test, result):
         "result": result,
         "link": f"{RESULTS_SERVER}/{RESULTS_FOLDER}/{results_id}/{group}-{test.replace('/', '-')}"
     }
+
+    # avoid duplicates, where all fields are the same
+    for result in data["results"]:
+        if result["test"] == test and result["group"] == group and result["result"] == result:
+            return
 
     data["results"].append(new_result)
 
