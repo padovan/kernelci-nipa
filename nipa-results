@@ -22,6 +22,8 @@ KERNELCI_EXECUTOR = "kernelci-lava-collabora"
 MAESTRO_PROD_API = "https://kernelci-api.westus3.cloudapp.azure.com/"
 MAESTRO_STAGING_API = "https://staging.kernelci.org:9000/"
 
+verbose = False
+
 def load_json(file_path):
     """Load JSON data from a file, returning an empty list if the file doesn't exist or is invalid."""
     if not os.path.exists(file_path):
@@ -56,6 +58,20 @@ def maestro_fetch_node(url, nodeid):
 
     return response.json()
 
+
+def maestro_nodes_query(url, query):
+    """Query Maestro nodes with a given query."""
+    headers = {
+        "Content-Type": "application/json; charset=utf-8",
+    }
+    url = url + "latest/nodes/fast?" + query
+    response = requests.get(url, headers=headers)
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as ex:
+        print(ex.response.json().get("detail"), file=sys.stderr)
+        sys.exit(errno.ENOENT)
+    return response.json()
 
 def convert_to_nipa_timestamp(timestamp):
     """Convert ISO 8601 timestamp to the required format with timezone."""
@@ -103,6 +119,10 @@ def add_to_manifest(jsons_folder, results, branch):
         "branch": branch,
         "executor": KERNELCI_EXECUTOR
     }
+    # avoid duplicates (they might contain multiple tests)
+    for entry in manifest:
+        if entry["url"] == url and entry["branch"] == branch:
+            return
     manifest.append(new_entry)
 
     save_json(file_path, manifest)
@@ -128,7 +148,7 @@ def create_results(output, branch, start, end, results_id):
     return file_path
 
 
-def add_result(output, results_id, group, test, result):
+def add_result_json(output, results_id, group, test, result):
     """Appends a test result to the specified results JSON file."""
     file_path = os.path.join(output, f"results-{results_id}.json")
 
@@ -145,21 +165,81 @@ def add_result(output, results_id, group, test, result):
         "link": f"{RESULTS_SERVER}/{RESULTS_FOLDER}/{results_id}/{group}-{test.replace('/', '-')}"
     }
 
+    # avoid duplicates, where all fields are the same
+    for result in data["results"]:
+        if result["test"] == test and result["group"] == group and result["result"] == result:
+            return
+
     data["results"].append(new_result)
 
     save_json(file_path, data)
     print(f"Added test result to {file_path}")
 
+def retrieve_lavalog_url(node):
+    """Retrieve lava log url from the node."""
+    # if this job dont have artifacts/lava_log
+    # we keep walking up the tree until we find one
+    while "lava_log" not in node["artifacts"]:
+        node = maestro_fetch_node(MAESTRO_PROD_API, node["parent"])
+        if node["kind"] != "job":
+            print(f"Error: Node {node['id']} is not a job.", file=sys.stderr)
+            sys.exit(errno.ENOENT)
+    return node["artifacts"]["lava_log"]
+
+def retrieve_test_group(node):
+    """Retrieve test information, by walking up the tree."""
+    parent_id = node["parent"]
+    parent = maestro_fetch_node(MAESTRO_PROD_API, parent_id)
+
+    # main job have jobid, other jobs(groups) dont
+    # for now we treat them the same way
+    return parent["name"]
+
+def retrieve_test_nodes(node):
+    """Retrieve test nodes down a job node."""
+    query = f"parent={node['id']}"
+    children = maestro_nodes_query(MAESTRO_PROD_API, query)
+    tests = []
+    for child in children:
+        if child["kind"] == "test":
+            if verbose:
+                print(f"Test node: {child['name']} added to list")
+            tests.append(child)
+        elif child["kind"] == "job":
+            if verbose:
+                print(f"Job node: {child['name']}, walking down")
+            tests.extend(retrieve_test_nodes(child))
+    return tests
+
+def generate_test_results(node, group, log_url, results_json,
+                          jsons_folder, results_folder,
+                          results_id):
+    """Generate test results from a Maestro node."""
+    test = node["name"]
+    result = node["result"] if node["result"] == "pass" else "fail"
+    branch = node["data"]["kernel_revision"]["branch"]
+    test_id = node["id"]
+
+    add_result_json(jsons_folder, results_id, group, test, result)
+    add_to_manifest(jsons_folder, results_json, branch)
+
+    folder = os.path.join(results_folder, test_id)
+    os.makedirs(folder, exist_ok=True)
+    download_and_extract_log(folder, log_url)
+
 
 def add_from_kernelci_node(id, jsons_folder, results_folder):
     node = maestro_fetch_node(MAESTRO_PROD_API, id)
 
-    if node["kind"] != "job":
-        print(f"Error: Node {id} not a 'job' kind.", file=sys.stderr)
+    # We can accept multiple kinds of nodes:
+    # - job, but then we need to fetch all children results (TODO)
+    # - test, we will need to walk up to get more information 
+    if node["kind"] != "test" and node["kind"] != "job":
+        print(f"Error: Node {id} not a 'job' or 'test' kind.", file=sys.stderr)
         sys.exit(errno.ENOENT)
 
     if node["state"] != "done":
-        print(f"Error: Job {id} didn't finish yet.", file=sys.stderr)
+        print(f"Error: Job/Test {id} didn't finish yet.", file=sys.stderr)
         sys.exit(errno.ENOENT)
 
     branch = node["data"]["kernel_revision"]["branch"]
@@ -167,24 +247,38 @@ def add_from_kernelci_node(id, jsons_folder, results_folder):
     # NOTE: should start be from the parent checkout?
     start =  convert_to_nipa_timestamp(node["created"])
     end =  convert_to_nipa_timestamp(node["updated"])
-    results_json = create_results(jsons_folder, branch, start, end, id)
+    group = None
 
-    result = node["result"] if node["result"] == "pass" else "fail"
-    group = "blktests"
-    test = "nvme/056"
-    add_result(jsons_folder, id, group, test, result)
-    add_to_manifest(jsons_folder, results_json, branch)
+    if node["kind"] == "job":
+        if verbose:
+            print(f"Kind: job, walking down to find tests")
+        log_url = retrieve_lavalog_url(node)
+        group = node["name"]
+        test_nodes = retrieve_test_nodes(node)
+        results_json = create_results(jsons_folder, branch, start, end, node["id"])
+        for test in test_nodes:
+            # skip node names login and kernelmsg
+            if test["name"] in ["login", "kernelmsg"]:
+                continue
+            generate_test_results(test, group, log_url, results_json, jsons_folder, results_folder, node["id"])
+        return
+    elif node["kind"] == "test":
+        group = retrieve_test_group(node)
+        if verbose:
+            print(f"Test kind: {id} Group: {group}")
+        log_url = retrieve_lavalog_url(node)
+        results_json = create_results(jsons_folder, branch, start, end, node["id"])
+        generate_test_results(node, group, log_url, results_json, jsons_folder, results_folder, node["id"])
 
-    folder = os.path.join(results_folder, id)
-    os.makedirs(folder, exist_ok=True)
-    log = node["artifacts"]["lava_log"]
-    download_and_extract_log(folder, log)
+
 
 
 def main():
+    global verbose
     parser = argparse.ArgumentParser(description="NIPA Results Management")
     parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR,
                                  help="Output directory (default: output)")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output", default=False)
     subparsers = parser.add_subparsers(dest="command", required=True, help="Available subcommands")
 
     results_parser = subparsers.add_parser("bootstrap", help="Generate results JSON file")
@@ -200,9 +294,12 @@ def main():
     add_result_parser.add_argument("--result", required=True, choices=["pass", "fail", "skip"], help="Test result status")
 
     add_result_parser = subparsers.add_parser("kci-node", help="Add results from a Maestro node")
-    add_result_parser.add_argument("--id", type=str, help="KernelCI's Maestro node id of the result")
+    add_result_parser.add_argument("--id", type=str, help="KernelCI's Maestro node id of the result", required=True)
 
     args = parser.parse_args()
+    verbose = args.verbose
+    if verbose:
+        print(f"Verbose mode enabled")
 
     os.makedirs(args.output, exist_ok=True)
     jsons_folder = os.path.join(args.output, JSONS_FOLDER)
@@ -214,7 +311,7 @@ def main():
         file_name = create_results(jsons_folder, args.branch, args.start, args.end, args.id)
         add_to_manifest(jsons_folder, file_name, args.branch)
     elif args.command == "add-result":
-        add_result(jsons_folder, args.id, args.group, args.test, args.result)
+        add_result_json(jsons_folder, args.id, args.group, args.test, args.result)
     elif args.command == "kci-node":
         add_from_kernelci_node(args.id, jsons_folder, results_folder)
 
