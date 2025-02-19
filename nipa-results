@@ -124,7 +124,8 @@ def add_to_manifest(jsons_folder, results, branch):
 def create_results(output, branch, start, end, results_id):
     os.makedirs(output, exist_ok=True)
 
-    file_path = os.path.join(output, f"results-{results_id}.json")
+    file_name = f"results-{results_id}.json"
+    file_path = os.path.join(output, file_name)
 
     results_data = {
         "executor": KERNELCI_EXECUTOR,
@@ -137,7 +138,7 @@ def create_results(output, branch, start, end, results_id):
 
     save_json(file_path, results_data)
     print(f"Results file created: {file_path}")
-    return file_path
+    return file_name
 
 
 def add_result(output, results_id, group, test, result, folder_name):
