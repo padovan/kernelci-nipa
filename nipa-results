@@ -12,7 +12,7 @@ import shutil
 
 from datetime import datetime
 
-DEFAULT_OUTPUT_DIR = "output"
+DEFAULT_OUTPUT_DIR = "netdev-results"
 RESULTS_SERVER = "https://nipa-results.collabora.dev"
 JSONS_FOLDER = "jsons"
 RESULTS_FOLDER = "results"
@@ -200,7 +200,7 @@ def add_from_kernelci_node(id, jsons_folder, results_folder):
 def main():
     parser = argparse.ArgumentParser(description="NIPA Results Management")
     parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR,
-                                 help="Output directory (default: output)")
+                                 help="Output directory (default: netdev-results)")
     subparsers = parser.add_subparsers(dest="command", required=True, help="Available subcommands")
 
     results_parser = subparsers.add_parser("bootstrap", help="Generate results JSON file")
