@@ -166,29 +166,33 @@ def add_result(output, results_id, group, test, result):
 def add_from_kernelci_node(id, jsons_folder, results_folder):
     node = maestro_fetch_node(MAESTRO_PROD_API, id)
 
-    if node["kind"] != "job":
-        print(f"Error: Node {id} not a 'job' kind.", file=sys.stderr)
+    if node["kind"] != "test":
+        print(f"Error: Node {id} not a 'test' kind.", file=sys.stderr)
         sys.exit(errno.ENOENT)
 
     if node["state"] != "done":
         print(f"Error: Job {id} didn't finish yet.", file=sys.stderr)
         sys.exit(errno.ENOENT)
 
-    branch = node["data"]["kernel_revision"]["branch"]
+    parent = maestro_fetch_node(MAESTRO_PROD_API, node["parent"])
+    if parent["kind"] != "job":
+        print(f"Error: Node {id} not a 'job' kind.", file=sys.stderr)
+        sys.exit(errno.ENOENT)
 
     # NOTE: should start be from the parent checkout?
-    start =  convert_to_nipa_timestamp(node["created"])
+    start =  convert_to_nipa_timestamp(parent["created"])
     end =  convert_to_nipa_timestamp(node["updated"])
-    results_json = create_results(jsons_folder, branch, start, end, id)
+    branch = node["data"]["kernel_revision"]["branch"]
+    results_json = create_results(jsons_folder, branch, start, end, parent["id"])
 
     result = node["result"] if node["result"] == "pass" else "fail"
-    group = "blktests"
-    test = "nvme/056"
-    log_url = retrieve_lavalog_url(node)
-    add_result(jsons_folder, id, group, test, result)
+    group = parent["name"]
+    test = node["name"]
+    log_url = retrieve_lavalog_url(parent)
+    add_result(jsons_folder, parent["id"], group, test, result)
     add_to_manifest(jsons_folder, results_json, branch)
 
-    folder = os.path.join(results_folder, id)
+    folder = os.path.join(results_folder, parent["id"])
     os.makedirs(folder, exist_ok=True)
     download_and_extract_log(folder, log_url)
 

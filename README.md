@@ -1,3 +1,3 @@
-To run:
+To run supply the 'test' node id:
 
-./nipa-results kci-node --id 67ae6cb7b51b43eaeddb75f0
+./nipa-results kci-node --id 67b5b0d0f7707533c0feac18
