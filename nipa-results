@@ -226,22 +226,7 @@ def main():
     parser = argparse.ArgumentParser(description="NIPA Results Management")
     parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR,
                                  help="Output directory (default: netdev-results)")
-    subparsers = parser.add_subparsers(dest="command", required=True, help="Available subcommands")
-
-    results_parser = subparsers.add_parser("bootstrap", help="Generate results JSON file")
-    results_parser.add_argument("--branch", required=True, help="Branch name")
-    results_parser.add_argument("--start", required=True, help="Start time (ISO format: YYYY-MM-DD HH:MM:SS)")
-    results_parser.add_argument("--end", required=True, help="End time (ISO format: YYYY-MM-DD HH:MM:SS)")
-    results_parser.add_argument("--id", required=True, help="Results ID (used to build the link)")
-
-    add_result_parser = subparsers.add_parser("add-result", help="Append a test result to a results file")
-    add_result_parser.add_argument("--id", required=True, help="Results ID (used to find the results file)")
-    add_result_parser.add_argument("--group", required=True, help="Test group name")
-    add_result_parser.add_argument("--test", required=True, help="Test name")
-    add_result_parser.add_argument("--result", required=True, choices=["pass", "fail", "skip"], help="Test result status")
-
-    add_result_parser = subparsers.add_parser("kci-node", help="Add results from a Maestro node")
-    add_result_parser.add_argument("--id", type=str, help="KernelCI's Maestro node id of the result")
+    parser.add_argument("--id", type=str, help="KernelCI's Maestro node id of the result")
 
     args = parser.parse_args()
 
@@ -251,13 +236,8 @@ def main():
     results_folder = os.path.join(args.output, RESULTS_FOLDER)
     os.makedirs(results_folder, exist_ok=True)
 
-    if args.command == "bootstrap":
-        file_name = create_results(jsons_folder, args.branch, args.start, args.end, args.id)
-        add_to_manifest(jsons_folder, file_name, args.branch)
-    elif args.command == "add-result":
-        add_result(jsons_folder, args.id, args.group, args.test, args.result)
-    elif args.command == "kci-node":
-        add_from_kernelci_node(args.id, jsons_folder, results_folder)
+    add_from_kernelci_node(args.id, jsons_folder, results_folder)
+
 
 if __name__ == "__main__":
     main()
