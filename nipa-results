@@ -114,6 +114,14 @@ def download_and_extract_log(folder, url):
     os.remove(temp_gz_file)
 
 
+def add_dashboard_link_file(folder, id):
+    log_file = os.path.join(folder, "kernelci_dashboard.txt")
+    link = f"http://d.kernelci.org/test/maestro:{id}"
+
+    with open(log_file, "w") as f:
+        f.write(link)
+
+
 def add_to_manifest(jsons_folder, results, branch):
     file_path = os.path.join(jsons_folder, RESULTS_MANIFEST)
 
@@ -231,6 +239,7 @@ def add_from_kernelci_node(id, jsons_folder, results_folder):
         os.makedirs(test_folder, exist_ok=True)
 
         log_url = retrieve_lavalog_url(parent)
+        add_dashboard_link_file(test_folder, node["id"])
         download_and_extract_log(test_folder, log_url)
 
     add_to_manifest(jsons_folder, results_json, branch)
