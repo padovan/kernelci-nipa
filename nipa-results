@@ -81,18 +81,6 @@ def convert_to_nipa_timestamp(timestamp):
     return dt.strftime("%Y-%m-%d %H:%M:%S.%f+00:00")
 
 
-def retrieve_lavalog_url(node):
-    """Retrieve lava log url from the node."""
-    # if this job dont have artifacts/lava_log
-    # we keep walking up the tree until we find one
-    while "lava_log" not in node["artifacts"]:
-        node = maestro_fetch_node(MAESTRO_PROD_API, node["parent"])
-        if node["kind"] != "job":
-            print(f"Error: Node {node['id']} is not a job.", file=sys.stderr)
-            sys.exit(errno.ENOENT)
-    return node["artifacts"]["lava_log"]
-
-
 def download_and_extract_log(folder, url):
     """Download a log file, check if it's gzip-compressed, and extract it."""
     response = requests.get(url, stream=True)
@@ -203,7 +191,19 @@ def add_result(output, results_id, group, test, result, folder_name):
 
 
 def add_from_kernelci_node(id, output_folder):
-    parent = maestro_fetch_node(MAESTRO_PROD_API, id)
+    # This is LAVA job node
+    lava_job = maestro_fetch_node(MAESTRO_API, id)
+    parent = None
+    # Search group job of tests
+    children_jobs = maestro_fetch_children_nodes(MAESTRO_API, lava_job)
+    for child in children_jobs:
+        if child["kind"] == "job" and child["name"] != "setup":
+            parent = child
+            break
+
+    if not parent:
+        print(f"Error: No parent job found for node {id}", file=sys.stderr)
+        sys.exit(errno.ENOENT)
 
     if parent["kind"] != "job":
         print(f"Error: Node {id} not a 'test' kind.", file=sys.stderr)
@@ -230,7 +230,7 @@ def add_from_kernelci_node(id, output_folder):
     results_json = create_results_file(jsons_folder, branch, start, end, parent["id"])
     parent_folder = os.path.join(results_folder, parent["id"])
 
-    children = maestro_fetch_children_nodes(MAESTRO_PROD_API, parent)
+    children = maestro_fetch_children_nodes(MAESTRO_API, parent)
     for node in children:
         # NOTE: we only support parent with 'test' child only for the time being
         if node["kind"] != "test":
@@ -246,7 +246,12 @@ def add_from_kernelci_node(id, output_folder):
         test_folder = os.path.join(parent_folder, folder_name)
         os.makedirs(test_folder, exist_ok=True)
 
-        log_url = retrieve_lavalog_url(parent)
+        try:
+            log_url = lava_job["artifacts"]["lava_log"]
+        except KeyError:
+            print(f"Error: No lava log found for node {id}", file=sys.stderr)
+            sys.exit(errno.ENOENT)
+
         add_dashboard_link_file(test_folder, node["id"])
         download_and_extract_log(test_folder, log_url)
 
