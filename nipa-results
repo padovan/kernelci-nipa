@@ -136,6 +136,18 @@ def add_to_manifest(jsons_folder, results, branch):
 
     save_json(file_path, manifest)
     print(f"Entry added to {file_path}")
+    return True
+
+
+def results_exist_in_manifest(jsons_folder, node_id):
+    file_path = os.path.join(jsons_folder, RESULTS_MANIFEST)
+    manifest = load_json(file_path)
+
+    if any(node_id in entry.get("url") for entry in manifest):
+        print(f"Entry for {node_id} already exists in {file_path}")
+        return True
+
+    return False
 
 
 def create_results_file(output, branch, start, end, results_id):
@@ -192,6 +204,8 @@ def add_from_kernelci_node(id, jsons_folder, results_folder):
         print(f"Error: Job {id} didn't finish yet.", file=sys.stderr)
         sys.exit(errno.ENOENT)
 
+    if results_exist_in_manifest(jsons_folder, id):
+        return
 
     # NOTE: should start be from the parent checkout?
     start =  convert_to_nipa_timestamp(parent["created"])
