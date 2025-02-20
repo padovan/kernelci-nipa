@@ -21,6 +21,7 @@ KERNELCI_EXECUTOR = "kernelci-lava-collabora"
 
 MAESTRO_PROD_API = "https://kernelci-api.westus3.cloudapp.azure.com/"
 MAESTRO_STAGING_API = "https://staging.kernelci.org:9000/"
+MAESTRO_API = MAESTRO_PROD_API
 
 def load_json(file_path):
     """Load JSON data from a file, returning an empty list if the file doesn't exist or is invalid."""
@@ -253,12 +254,16 @@ def add_from_kernelci_node(id, output_folder):
 
 
 def main():
+    global MAESTRO_API
     parser = argparse.ArgumentParser(description="NIPA Results Management")
     parser.add_argument("-o", "--output", default=DEFAULT_OUTPUT_DIR,
                         help="Output directory (default: netdev-results)")
     parser.add_argument("--id", type=str, help="KernelCI's Maestro node id of the result", required=True)
+    parser.add_argument("--staging", help="Use staging Maestro API", action="store_true")
 
     args = parser.parse_args()
+    if args.staging:
+        MAESTRO_API = MAESTRO_STAGING_API
 
     add_from_kernelci_node(args.id, args.output)
 
