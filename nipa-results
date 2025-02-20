@@ -227,11 +227,11 @@ def add_from_kernelci_node(id, jsons_folder, results_folder):
         folder_name = f"{group}-{test.replace('/', '-')}"
         add_result(jsons_folder, parent["id"], group, test, result, folder_name)
 
-    test_folder = os.path.join(parent_folder, folder_name)
-    os.makedirs(test_folder, exist_ok=True)
+        test_folder = os.path.join(parent_folder, folder_name)
+        os.makedirs(test_folder, exist_ok=True)
 
-    log_url = retrieve_lavalog_url(parent)
-    download_and_extract_log(test_folder, log_url)
+        log_url = retrieve_lavalog_url(parent)
+        download_and_extract_log(test_folder, log_url)
 
     add_to_manifest(jsons_folder, results_json, branch)
 
