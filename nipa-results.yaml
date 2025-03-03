@@ -1,0 +1,14 @@
+platforms:
+  - name: "supermicro-as-2015hr-tnr"
+    device:
+      driver: mlx5_core
+      versions:
+        fixed:
+          board.part_number: MCX755106AC-HEAT
+          fw.psid: MT_0000001045
+        running:
+          fw.version: 22.32.1216
+          fw: 22.32.1216
+        stored:
+          fw.version: 22.32.1216
+          fw: 22.32.1216
