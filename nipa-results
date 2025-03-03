@@ -9,6 +9,7 @@ import sys
 import requests
 import gzip
 import shutil
+import yaml
 
 from datetime import datetime
 
@@ -147,7 +148,7 @@ def results_exist_in_manifest(jsons_folder, node_id):
     return False
 
 
-def create_results_file(output, branch, start, end, results_id):
+def create_results_file(output, branch, start, end, results_id, device_info):
     os.makedirs(output, exist_ok=True)
 
     file_name = f"results-{results_id}.json"
@@ -159,7 +160,8 @@ def create_results_file(output, branch, start, end, results_id):
         "start": start,
         "end": end,
         "results": [],
-        "link": f"{RESULTS_SERVER}/{RESULTS_FOLDER}/{results_id}/"
+        "link": f"{RESULTS_SERVER}/{RESULTS_FOLDER}/{results_id}/",
+        "device": device_info
     }
 
     save_json(file_path, results_data)
@@ -188,6 +190,15 @@ def add_result(output, results_id, group, test, result, folder_name):
 
     save_json(file_path, data)
     print(f"Added test result to {file_path}")
+
+
+def retrieve_devinfo(platform):
+    with open('nipa-results.yaml', 'r') as file:
+        data = yaml.safe_load(file)
+        for record in data['platforms']:
+            if record['name'] == platform:
+                return record['device']
+    return {}
 
 
 def add_from_kernelci_node(id, output_folder):
@@ -227,7 +238,8 @@ def add_from_kernelci_node(id, output_folder):
     start =  convert_to_nipa_timestamp(parent["created"])
     end =  convert_to_nipa_timestamp(parent["updated"])
     branch = parent["data"]["kernel_revision"]["branch"]
-    results_json = create_results_file(jsons_folder, branch, start, end, parent["id"])
+    device_info = retrieve_devinfo(parent["data"]["platform"])
+    results_json = create_results_file(jsons_folder, branch, start, end, parent["id"], device_info)
     parent_folder = os.path.join(results_folder, parent["id"])
 
     children = maestro_fetch_children_nodes(MAESTRO_API, parent)
